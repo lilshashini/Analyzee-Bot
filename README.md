@@ -1,11 +1,6 @@
-# Analyzee-Bot
+# 🏭 Analyzee-Bot - Production Analytics Dashboard
+
 This intelligent chatbot is designed to interpret natural language queries and provide real-time insights from an industrial database. It automatically converts user input into optimized SQL queries, retrieves relevant data, and generates interactive visualizations such as line charts, bar charts, and pie charts. Additionally, the chatbot includes a predictive analytics module powered by Prophet to forecast production, consumption, and utilization trends based on historical data. Built with Python, Streamlit, LangChain, MySQL, and integrated with Azure OpenAI API, the chatbot streamlines data-driven decision-making by combining conversational AI, real-time analytics, and predictive modeling in one solution.
-
-
-
-# 🏭 Althinect Intelligence Bot - Production Analytics Dashboard
-
-A powerful Streamlit-based chatbot that provides intelligent analytics and visualizations for multi-machine production data. Built with LangChain, Azure OpenAI, and interactive Plotly charts.
 
 ![Python](https://img.shields.io/badge/python-v3.8+-blue.svg)
 ![Streamlit](https://img.shields.io/badge/streamlit-v1.28+-red.svg)
@@ -116,46 +111,6 @@ Try these natural language queries:
 - "Which machine had the highest efficiency in April?"
 - "Show me the daily production trends"
 - "Compare machine performance this month"
-```
-
-## 🏗️ Architecture
-
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Streamlit UI  │    │   LangChain      │    │  Azure OpenAI   │
-│                 │────│   SQL Chain      │────│     GPT-4       │
-│  Chat Interface │    │                  │    │                 │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                        │                       │
-         │                        │                       │
-         ▼                        ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Plotly Charts  │    │  MySQL Database  │    │  Smart Prompts  │
-│                 │    │                  │    │                 │
-│  Visualizations │    │ Production Data  │    │ Query Templates │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-```
-
-## 📁 Project Structure
-
-```
-althinect-intelligence-bot/
-│
-├── app.py                 # Main Streamlit application
-├── requirements.txt       # Python dependencies
-├── .env.example          # Environment variables template
-├── README.md             # Project documentation
-├── .gitignore           # Git ignore rules
-│
-├── docs/                # Documentation
-│   ├── setup.md         # Detailed setup instructions
-│   ├── examples.md      # Query examples
-│   └── troubleshooting.md
-│
-├── sample_data/         # Sample database schemas
-│   └── schema.sql       # Database structure examples
-│
-└── logs/               # Application logs (created at runtime)
-    └── chatbot.log     # Application log file
 ```
 
 ## 🔧 Configuration

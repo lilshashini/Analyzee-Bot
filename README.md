@@ -214,3 +214,23 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 # Performance Insights
 "Which machine performed best last week?"
 ```
+
+
+althinect-intelligence-bot/
+│
+├── app.py                 # Main Streamlit application
+├── requirements.txt       # Python dependencies
+├── .env.example          # Environment variables template
+├── README.md             # Project documentation
+├── .gitignore           # Git ignore rules
+│
+├── docs/                # Documentation
+│   ├── setup.md         # Detailed setup instructions
+│   ├── examples.md      # Query examples
+│   └── troubleshooting.md
+│
+├── sample_data/         # Sample database schemas
+│   └── schema.sql       # Database structure examples
+│
+└── logs/               # Application logs (created at runtime)
+    └── chatbot.log     # Application log file

@@ -1,0 +1,526 @@
+{
+  "name": "Chat_Bot3",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2920,
+        160
+      ],
+      "id": "68ac38d9-0b17-493e-9ac9-6c2cfa0270ec",
+      "name": "When chat message received",
+      "webhookId": "97a017b0-434a-4871-85c3-50ac1db9fb2e"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = DATABASE() ORDER BY table_name, ordinal_position LIMIT 50;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        -1720,
+        140
+      ],
+      "id": "465733d7-c4da-4617-b45b-e21873770c9e",
+      "name": "Get Database Schema",
+      "credentials": {
+        "mySql": {
+          "id": "20Divy9vYc2KmRZn",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert SQL query generator for production data analysis. Based on the database schema and user question, generate a precise SQL query.\n\nDatabase Schema:\n{{ $('Get Database Schema').all().map(item => `${item.json.TABLE_NAME}.${item.json.COLUMN_NAME} (${item.json.DATA_TYPE})`).join('\\n') }}\n\n\nIMPORTANT GUIDELINES:\n1. For multi-machine production queries by time period:\n   - Always include device_name/machine_name as a separate column\n   - Include time grouping (day, month, hour) as appropriate\n   - Use SUM() for production values\n   - GROUP BY both time period AND machine/device\n   - ORDER BY time period, then machine name\n\n2. For April 2025 data specifically:\n   - Use WHERE clause: WHERE YEAR(actual_start_time) = 2025 AND MONTH(actual_start_time) = 4\n\n3. For daily data:\n   - Use DATE(actual_start_time) for grouping\n   - Alias as 'production_date'\n\n4. Column naming conventions:\n   - Use clear aliases: production_output AS daily_production\n   - Use device_name AS machine_name for consistency\n\n5. Data quality:\n   - Handle NULL values: WHERE production_output IS NOT NULL\n   - Filter out zero values: AND production_output > 0\n\n6. For pulse per minute calculations:\n   - Use LAG() function for time-based calculations\n   - Order by timestamp for proper sequence\n\n\n    IMPORTANT GUIDELINES:\n    \n    1. For multi-machine production queries by time period:\n       - Always include device_name/machine_name as a separate column\n       - Include time grouping (day, month, hour) as appropriate\n       - Use SUM() for production values\n       - GROUP BY both time period AND machine/device\n       - ORDER BY time period, then machine name\n    \n    2. For April 2025 data specifically:\n       - Use WHERE clause with date range: WHERE DATE(actual_start_time) BETWEEN '2025-04-01' AND '2025-04-30'\n       - Or use: WHERE YEAR(actual_start_time) = 2025 AND MONTH(actual_start_time) = 4\n    \n    3. For daily data:\n       - Use DATE(actual_start_time) or DATE_FORMAT(actual_start_time, '%Y-%m-%d') for grouping\n       - Alias as 'production_date' or 'day'\n    \n    4. Column naming conventions:\n       - Use clear aliases: production_output AS daily_production\n       - Use device_name AS machine_name for consistency\n       - Use DATE(actual_start_time) AS production_date\n    \n    5. Data quality:\n       - Handle NULL values: WHERE production_output IS NOT NULL\n       - Filter out zero values if needed: AND production_output > 0\n       \n    \n    6. For pulse per minute calculations:\n        - Use LAG() function: LAG(length) OVER (PARTITION BY device_name ORDER BY timestamp)\n        - Calculate pulse as: length - LAG(length) OVER (PARTITION BY device_name ORDER BY timestamp) AS pulse_per_minute\n        - Filter out NULL values from LAG calculation\n        - Order by timestamp for proper sequence\n    \n\nUser Question: {{ $('When chat message received').item.json.chatInput }}\nReturn ONLY the SQL query without any formatting or explanation.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -1480,
+        140
+      ],
+      "id": "5a32b63b-a1f3-40c4-90a5-11b3ae476ccb",
+      "name": "SQL Generator Agent",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -1460,
+        340
+      ],
+      "id": "166f29eb-69e7-4521-90e0-ef58b97e17e8",
+      "name": "Azure OpenAI Chat Model",
+      "credentials": {
+        "azureOpenAiApi": {
+          "id": "DcduwkZNM6n3pWRb",
+          "name": "Azure Open AI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        -848,
+        160
+      ],
+      "id": "fb6da719-a864-4114-bbda-23073dc730a3",
+      "name": "Execute SQL Query",
+      "credentials": {
+        "mySql": {
+          "id": "20Divy9vYc2KmRZn",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process query results and prepare for analysis\nconst queryResults = $input.all();\nconst userQuery = $items('Extract and Validate SQL')[0].json.user_query;\nconst sqlQuery = $items('Extract and Validate SQL')[0].json.sql;\n\n// Check if results are empty\nif (!queryResults || queryResults.length === 0) {\n  return [{\n    has_data: false,\n    error_message: \"No data found for your query. This could be due to date range issues or data availability.\",\n    user_query: userQuery,\n    sql_query: sqlQuery\n  }];\n}\n\n// Process data for analysis\nconst processedData = queryResults.map(item => item.json);\n\n// Enhanced visualization detection - more specific keywords\nconst userQueryLower = userQuery.toLowerCase();\nconst vizKeywords = [\n  'plot', 'chart', 'graph', 'visualize', \n  'bar chart', 'line chart', 'pie chart', 'trend chart', 'comparison chart',\n  'histogram', 'scatter plot', 'dashboard', 'visual', 'draw'\n];\n\n// More specific detection - require explicit visualization requests\nconst needsVisualization = vizKeywords.some(keyword => userQueryLower.includes(keyword)) ||\n  (userQueryLower.includes('show') && (userQueryLower.includes('chart') || userQueryLower.includes('graph'))) ||\n  (userQueryLower.includes('display') && (userQueryLower.includes('chart') || userQueryLower.includes('graph')));\n\n// Determine chart type based on user query\nlet suggestedChartType = 'bar';\nif (userQueryLower.includes('line') || userQueryLower.includes('trend') || userQueryLower.includes('time')) {\n  suggestedChartType = 'line';\n} else if (userQueryLower.includes('pie')) {\n  suggestedChartType = 'pie';\n} else if (userQueryLower.includes('scatter')) {\n  suggestedChartType = 'scatter';\n}\n\n// Analyze data structure for visualization\nlet xAxis = null;\nlet yAxis = null;\nlet groupBy = null;\n\nif (processedData.length > 0) {\n  const columns = Object.keys(processedData[0]);\n  \n  // Smart column detection\n  const dateColumns = columns.filter(col => \n    col.toLowerCase().includes('date') || \n    col.toLowerCase().includes('time') ||\n    col.toLowerCase().includes('day') ||\n    col.toLowerCase().includes('month')\n  );\n  \n  const numericColumns = columns.filter(col => {\n    const sampleValue = processedData[0][col];\n    return typeof sampleValue === 'number' || !isNaN(Number(sampleValue));\n  });\n  \n  const textColumns = columns.filter(col => \n    !dateColumns.includes(col) && !numericColumns.includes(col)\n  );\n  \n  // Set axes based on data structure\n  if (dateColumns.length > 0) {\n    xAxis = dateColumns[0];\n  } else if (textColumns.length > 0) {\n    xAxis = textColumns[0];\n  } else {\n    xAxis = columns[0];\n  }\n  \n  if (numericColumns.length > 0) {\n    yAxis = numericColumns[0];\n  }\n  \n  if (textColumns.length > 1) {\n    groupBy = textColumns.find(col => col !== xAxis);\n  }\n}\n\n// Debug logging\nconsole.log('User Query:', userQuery);\nconsole.log('Needs Visualization:', needsVisualization);\n\nreturn [{\n  has_data: true,\n  needs_visualization: needsVisualization,\n  chart_type: suggestedChartType,\n  x_axis: xAxis,\n  y_axis: yAxis,\n  group_by: groupBy,\n  data: processedData,\n  data_count: processedData.length,\n  user_query: userQuery,\n  sql_query: sqlQuery,\n  data_summary: {\n    total_records: processedData.length,\n    columns: processedData.length > 0 ? Object.keys(processedData[0]) : [],\n    sample_data: processedData.slice(0, 3)\n  }\n}];"
+      },
+      "name": "Process Query Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        160
+      ],
+      "id": "ee13440b-e736-4cae-b7b1-0a508af09ee8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "750e2b27-76f3-4493-b52f-077fd5defbe2",
+              "leftValue": "={{ $json.needs_visualization }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        160
+      ],
+      "id": "2511cbb5-c1ec-420d-a0fe-d140a95fe52f",
+      "name": "Check if Visualization Needed"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate QuickChart configuration based on data and user query\nconst data = $json.data;\nconst chartType = $json.chart_type;\nconst xAxis = $json.x_axis;\nconst yAxis = $json.y_axis;\nconst groupBy = $json.group_by;\nconst userQuery = $json.user_query;\n\n// Prepare data for Chart.js format\nlet chartConfig = {\n  type: chartType,\n  data: {\n    labels: [],\n    datasets: []\n  },\n  options: {\n    responsive: true,\n    plugins: {\n      title: {\n        display: true,\n        text: `Production Analytics: ${userQuery}`,\n        font: { size: 16 }\n      },\n      legend: {\n        display: true,\n        position: 'top'\n      }\n    },\n    scales: {\n      y: {\n        beginAtZero: true,\n        title: {\n          display: true,\n          text: yAxis || 'Value'\n        }\n      },\n      x: {\n        title: {\n          display: true,\n          text: xAxis || 'Category'\n        }\n      }\n    }\n  }\n};\n\n// Handle different chart types\nif (chartType === 'pie') {\n  // For pie charts, use the first text column as labels and first numeric as values\n  const labels = data.map(item => item[xAxis]);\n  const values = data.map(item => parseFloat(item[yAxis]) || 0);\n  \n  chartConfig.data.labels = labels;\n  chartConfig.data.datasets = [{\n    data: values,\n    backgroundColor: [\n      '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',\n      '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'\n    ]\n  }];\n  \n  // Remove scales for pie chart\n  delete chartConfig.options.scales;\n  \n} else if (groupBy && data.some(item => item[groupBy])) {\n  // Multi-series chart (grouped data)\n  const groups = [...new Set(data.map(item => item[groupBy]))];\n  const labels = [...new Set(data.map(item => item[xAxis]))];\n  \n  chartConfig.data.labels = labels;\n  chartConfig.data.datasets = groups.map((group, index) => {\n    const groupData = data.filter(item => item[groupBy] === group);\n    const values = labels.map(label => {\n      const found = groupData.find(item => item[xAxis] === label);\n      return found ? parseFloat(found[yAxis]) || 0 : 0;\n    });\n    \n    const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'];\n    \n    return {\n      label: group,\n      data: values,\n      backgroundColor: colors[index % colors.length],\n      borderColor: colors[index % colors.length],\n      fill: chartType === 'line' ? false : true\n    };\n  });\n  \n} else {\n  // Single series chart\n  const labels = data.map(item => item[xAxis]);\n  const values = data.map(item => parseFloat(item[yAxis]) || 0);\n  \n  chartConfig.data.labels = labels;\n  chartConfig.data.datasets = [{\n    label: yAxis || 'Value',\n    data: values,\n    backgroundColor: chartType === 'line' ? '#36A2EB' : '#36A2EB80',\n    borderColor: '#36A2EB',\n    fill: chartType === 'line' ? false : true\n  }];\n}\n\n// Generate QuickChart URL\nconst chartConfigEncoded = encodeURIComponent(JSON.stringify(chartConfig));\nconst quickChartUrl = `https://quickchart.io/chart?c=${chartConfigEncoded}&width=800&height=400&format=png`;\n\nreturn [{\n  chart_config: chartConfig,\n  chart_url: quickChartUrl,\n  chart_type: chartType,\n  data_processed: true,\n  ...($json) // Include all original data\n}];\n"
+      },
+      "name": "Generate Chart Configuration",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        -80
+      ],
+      "id": "e999eeb6-8639-45cb-8ac6-fcde7e85b7df"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a data analyst providing insights about production data. Based on the SQL query results, provide a clear, informative response.\n\nUser Question: {{ $json.user_query }}\nSQL Query Used: {{ $json.sql_query }}\nQuery Results ({{ $json.data_count }} records):\n{{ JSON.stringify($json.data_summary.sample_data, null, 2) }}\n\nTotal Records: {{ $json.data_count }}\nColumns Available: {{ $json.data_summary.columns.join(', ') }}\n\nGuidelines:\n1. Summarize key findings from the data\n2. Mention specific numbers/values when relevant\n3. If this is multi-machine data, highlight comparisons between machines\n4. If this is time-series data, mention trends or patterns\n5. Keep the response concise but informative\n6. Use emojis to make the response engaging\n7. Format numbers appropriately\n\nProvide insights and explanation of the data:",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        320,
+        60
+      ],
+      "id": "4b8dddea-bbcf-48cc-82f8-d9aaea39002e",
+      "name": "Insight Generator Agent"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "maxTokens": 1000,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        260,
+        340
+      ],
+      "id": "821b4ff7-a269-4d79-bbcb-480b0bd633bf",
+      "name": "Azure OpenAI Chat Model1",
+      "credentials": {
+        "azureOpenAiApi": {
+          "id": "DcduwkZNM6n3pWRb",
+          "name": "Azure Open AI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Handle agent responses that don't need database\nif ($json.output && !$json.output.includes('ROUTE_TO_DATABASE') && !$json.has_data) {\n  return [{ \n    output: $json.output,\n    chart_data: null,\n    has_chart: false\n  }];\n}\n\n\n// Handle non-database responses first\nif ($json.is_final_response && $json.output) {\n  return [{ \n    output: $json.output,\n    chart_data: null,\n    has_chart: false\n  }];\n}\n\n\n// Determine which path we're coming from based on available data\nlet processResults = null;\nlet insightResults = null;\nlet chartData = null;\n\n// Check if we're coming from the chart path (Fetch Chart Image)\nif ($input.first()?.chart_url) {\n  // Coming from chart generation path\n  const chartInput = $input.first();\n  processResults = {\n    has_data: chartInput.has_data,\n    data_count: chartInput.data_count,\n    user_query: chartInput.user_query,\n    sql_query: chartInput.sql_query,\n    data_summary: chartInput.data_summary,\n    needs_visualization: chartInput.needs_visualization\n  };\n  \n  chartData = {\n    chart_url: chartInput.chart_url,\n    chart_type: chartInput.chart_type,\n    image_data: $input.first() // The HTTP response from chart image\n  };\n  \n  // Generate basic insights for chart path\n  insightResults = {\n    output: `📊 Chart generated successfully! Analyzed ${chartInput.data_count} records and created a ${chartInput.chart_type} chart visualization.`\n  };\n  \n} else if ($input.first()?.output || $input.first()?.text) {\n  // Coming from insight generation path\n  insightResults = $input.first();\n  \n  // Get process results from the insight generator's context\n  try {\n    processResults = $node[\"Process Query Results\"].json;\n  } catch (e) {\n    // Fallback if node reference fails\n    processResults = {\n      has_data: true,\n      data_count: 0,\n      user_query: 'Query executed',\n      sql_query: 'SELECT query executed',\n      data_summary: { sample_data: [] },\n      needs_visualization: false\n    };\n  }\n} else {\n  // Fallback: try to get process results directly\n  try {\n    processResults = $node[\"Process Query Results\"].json;\n    insightResults = { output: \"✅ Data analysis completed successfully.\" };\n  } catch (e) {\n    processResults = {\n      has_data: false,\n      error_message: \"Unable to retrieve query results\",\n      user_query: \"Unknown\",\n      sql_query: \"Unknown\"\n    };\n  }\n}\n\nlet chatMessage = \"\";\n\nif (!processResults) {\n  chatMessage = `❌ Could not retrieve query results.\\nPlease check if the workflow executed successfully.`;\n} else if (!processResults.has_data) {\n  chatMessage = `❌ ${processResults.error_message}\\n\\n**SQL Query Used:**\\n\\`\\`\\`sql\\n${processResults.sql_query}\\n\\`\\`\\`\\n\\n💡 **Suggestions:**\\n• Check if data exists for the specified time period\\n• Try a different date range\\n• Verify column names in your query`;\n} else {\n  let insights = \"✅ Data analysis completed successfully.\";\n\n  if (insightResults?.output) {\n    insights = insightResults.output;\n  } else if (insightResults?.text) {\n    insights = insightResults.text;\n  }\n\n  chatMessage = `${insights}\\n\\n📊 **Query Results:** ${processResults.data_count} records found\\n\\n`;\n\n  // Add chart if available\n  if (chartData) {\n    chatMessage += `📈 **Chart Generated:**\\n`;\n    chatMessage += `Chart Type: ${chartData.chart_type.toUpperCase()}\\n`;\n    chatMessage += `Chart URL: ${chartData.chart_url}\\n\\n`;\n    chatMessage += `![Production Chart](${chartData.chart_url})\\n\\n`;\n  }\n\n  // Add sample data preview\n  if (processResults.data_summary?.sample_data?.length > 0) {\n    chatMessage += `**Sample Data Preview:**\\n`;\n    processResults.data_summary.sample_data.slice(0, 5).forEach((row, index) => {\n      chatMessage += `${index + 1}. ${Object.entries(row).map(([key, value]) => `${key}: ${value}`).join(', ')}\\n`;\n    });\n    chatMessage += `\\n`;\n  }\n\n  if (processResults.needs_visualization && !chartData) {\n    chatMessage += `\\n📈 **Visualization Detected:** Your query requested charts but visualization generation may have failed. The data is available above.\\n`;\n  }\n\n  chatMessage += `\\n**SQL Query Used:**\\n\\`\\`\\`sql\\n${processResults.sql_query}\\n\\`\\`\\``;\n}\n\nreturn [{ \n  output: chatMessage,\n  chart_data: chartData,\n  has_chart: !!chartData\n}];\n"
+      },
+      "name": "Format Final Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        860,
+        500
+      ],
+      "id": "ac0e9101-a644-403e-b204-ac1066a5ee7a"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and validate SQL query\nlet sqlQuery = '';\n\n// Try different possible output formats from the AI agent\nif ($json.output) {\n  sqlQuery = $json.output;\n} else if ($json.text) {\n  sqlQuery = $json.text;\n} else if ($json.sql_query) {\n  sqlQuery = $json.sql_query;\n} else {\n  // Fallback: convert entire JSON to string and extract\n  const fullText = JSON.stringify($json);\n  sqlQuery = fullText;\n}\n\n// Clean the SQL query\nsqlQuery = sqlQuery.replace(/```sql/g, '').replace(/```/g, '').trim();\n\n// Basic SQL injection prevention\nconst dangerousPatterns = [\n  /drop\\s+table/i,\n  /delete\\s+from/i,\n  /truncate/i,\n  /alter\\s+table/i,\n  /create\\s+table/i,\n  /insert\\s+into/i,\n  /update\\s+.*set/i\n];\n\nconst isDangerous = dangerousPatterns.some(pattern => pattern.test(sqlQuery));\n\nif (isDangerous) {\n  throw new Error('Query contains potentially dangerous operations. Only SELECT queries are allowed.');\n}\n\n// Ensure it's a SELECT query\nif (!sqlQuery.toLowerCase().trim().startsWith('select')) {\n  throw new Error('Only SELECT queries are allowed.');\n}\n\n// Log the query for debugging\nconsole.log('Generated SQL Query:', sqlQuery);\n\n// Return values\nreturn [{\n  sql: sqlQuery,\n  user_query: $('When chat message received').item.json.chatInput || 'Not provided',\n  original_response: $json\n}];\n"
+      },
+      "name": "Extract and Validate SQL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1056,
+        320
+      ],
+      "id": "45047ad1-1bb5-406a-a222-702baeb9f94a"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        64,
+        -80
+      ],
+      "id": "0471ea61-09ef-4b22-9391-05e74f482d1f",
+      "name": "Fetch Chart Image"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an intelligent router for a production analytics system. Analyze user input and decide the appropriate action.\n\nCurrent user input: {{ $('When chat message received').item.json.chatInput }}\n\nDECISION LOGIC:\n1. If greeting (hi, hello, good morning, etc.) → Respond with friendly greeting about production analytics\n2. If asking about previous data/charts without specifics → Ask for clarification with examples\n3. If contains production/database keywords (machine, production, data, chart, April, March, 2024, 2025, downtime, etc.) → Route to database\n4. If general question → Provide helpful general response\n5. If asking for chart \"according to above data\" → Ask them to be specific about what data/time period\n\nIMPORTANT: \n- For chart requests, user MUST specify: time period, machines, and data type\n- If they say \"according to above data\" or reference previous queries, ask them to be specific\n- Always be helpful and guide them to ask better questions\n\nResponse format:\n- For greetings: Provide warm welcome + examples\n- For database queries: Return exactly \"ROUTE_TO_DATABASE\"  \n- For unclear chart requests: Ask for specific time period and parameters\n- For general: Provide helpful response about your capabilities\n\nRespond appropriately based on the input type.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -2460,
+        160
+      ],
+      "id": "416163c3-10b3-44a5-9d1f-e46d0ca616a1",
+      "name": "Smart Router Agent"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cf6199dc-d389-4883-992b-f9c587daaf48",
+              "leftValue": "={{ $json.output.includes('ROUTE_TO_DATABASE') }}",
+              "rightValue": "database",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2100,
+        500
+      ],
+      "id": "9f5355aa-7e27-4682-9a86-0fa624396fd8",
+      "name": "Check Routing Decision"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -2380,
+        380
+      ],
+      "id": "26e69e7f-d6cd-4692-b8ad-db3b246eda36",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -2520,
+        460
+      ],
+      "id": "974b7112-a030-45d1-aa20-fcb8815699c1",
+      "name": "Azure OpenAI Chat Model2",
+      "credentials": {
+        "azureOpenAiApi": {
+          "id": "DcduwkZNM6n3pWRb",
+          "name": "Azure Open AI account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Smart Router Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Database Schema": {
+      "main": [
+        [
+          {
+            "node": "SQL Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQL Generator Agent": {
+      "main": [
+        [
+          {
+            "node": "Extract and Validate SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "SQL Generator Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute SQL Query": {
+      "main": [
+        [
+          {
+            "node": "Process Query Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Query Results": {
+      "main": [
+        [
+          {
+            "node": "Check if Visualization Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Visualization Needed": {
+      "main": [
+        [
+          {
+            "node": "Generate Chart Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insight Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Chart Configuration": {
+      "main": [
+        [
+          {
+            "node": "Fetch Chart Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insight Generator Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Insight Generator Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract and Validate SQL": {
+      "main": [
+        [
+          {
+            "node": "Execute SQL Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Chart Image": {
+      "main": [
+        [
+          {
+            "node": "Insight Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Smart Router Agent": {
+      "main": [
+        [
+          {
+            "node": "Check Routing Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Routing Decision": {
+      "main": [
+        [
+          {
+            "node": "Get Database Schema",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Smart Router Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Smart Router Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "40f878d4-0f73-44af-9f47-4d98aa07e120",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e9fa2b6682e9b868021a6fc97ff9fd1f5f866c6c06533a98131365d623f7a1d0"
+  },
+  "id": "tjWz7kNNAXJmwSzN",
+  "tags": []
+}

@@ -203,15 +203,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 "Show me efficiency comparison for all machines in April 2025"
 
 # Production Trends
-"Plot daily production trends for the last 30 days"
+"give the monthly production of the machines in April using pie chart 2025"
 
 # Multi-Machine Comparison
 "Compare production output by machine for April with grouped bar chart"
 
 # Pulse Monitoring
-"Show pulse per minute variation for Machine1 today"
+"Show pulse per minute variation for Machine1 1st of April 2025"
 
-# Performance Insights
-"Which machine performed best last week?"
+
 ```
 

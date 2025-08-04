@@ -119,7 +119,7 @@ Try these natural language queries:
 
 The bot automatically detects and creates appropriate visualizations:
 
-- **efficiency_bar**: Single bar chart for machine efficiency comparison
+- **single_bar**: Single bar charts
 - **multi_machine_bar**: Grouped bar charts for multi-machine data
 - **line**: Time series and trend analysis
 - **pie**: Distribution and proportion charts
@@ -215,22 +215,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 "Which machine performed best last week?"
 ```
 
-
-althinect-intelligence-bot/
-│
-├── app.py                 # Main Streamlit application
-├── requirements.txt       # Python dependencies
-├── .env.example          # Environment variables template
-├── README.md             # Project documentation
-├── .gitignore           # Git ignore rules
-│
-├── docs/                # Documentation
-│   ├── setup.md         # Detailed setup instructions
-│   ├── examples.md      # Query examples
-│   └── troubleshooting.md
-│
-├── sample_data/         # Sample database schemas
-│   └── schema.sql       # Database structure examples
-│
-└── logs/               # Application logs (created at runtime)
-    └── chatbot.log     # Application log file

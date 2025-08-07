@@ -121,10 +121,9 @@ The bot automatically detects and creates appropriate visualizations:
 
 - **single_bar**: Single bar charts
 - **multi_machine_bar**: Grouped bar charts for multi-machine data
-- **line**: Time series and trend analysis
-- **pie**: Distribution and proportion charts
+- **line charts**: Time series and trend analysis
+- **pie charts**: Distribution and proportion charts
 - **pulse_line**: Specialized pulse rate monitoring
-- **scatter**: Correlation analysis
 
 ### Database Tables
 

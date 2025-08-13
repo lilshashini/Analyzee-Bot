@@ -1,11 +1,10 @@
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_community.utilities import SQLDatabase
 from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import AzureChatOpenAI  # Changed this import
-#from langchain_groq import ChatGroq
+from langchain_openai import AzureChatOpenAI
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -16,6 +15,28 @@ import sys
 from datetime import datetime
 import numpy as np
 import os 
+from supabase import create_client, Client
+from sqlalchemy import create_engine
+import psycopg2
+from urllib.parse import quote_plus
+from sqlalchemy import text  # Add this import
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+def get_env_var(key, default=None):
+    """Get environment variable from Streamlit secrets or OS"""
+    try:
+        # For Streamlit Cloud - use st.secrets
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        # If secrets don't exist, fall back to environment variables
+        pass
+    
+    # For local development - use os.getenv
+    return os.getenv(key, default)
 
 # Configure logging
 def setup_logging():
@@ -32,17 +53,54 @@ def setup_logging():
 
 logger = setup_logging()
 
-def init_database(user: str, password: str, host: str, port: str, database: str) -> SQLDatabase:
-    """Initialize database connection with logging"""
+def init_supabase_database(supabase_url: str, supabase_key: str, db_password: str) -> SQLDatabase:
+    """Initialize Supabase database connection with logging"""
     try:
-        db_uri = f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{database}"
-        logger.info(f"Attempting to connect to database: {host}:{port}/{database}")
+        # Extract connection details from Supabase URL
+        # Supabase URL format: https://your-project-id.supabase.co
+        project_id = supabase_url.replace('https://', '').replace('.supabase.co', '')
+        
+       # Pooler connection info
+        host = "aws-0-ap-southeast-1.pooler.supabase.com"
+        port = 6543
+        database = "postgres"
+        user = f"postgres.{project_id}"
+
+        # Encode password for special characters
+        encoded_password = quote_plus(db_password)
+
+        # PostgreSQL connection string (Transaction Pooler)
+        db_uri = f"postgresql://{user}:{encoded_password}@{host}:{port}/{database}"
+
+        logger.info(f"Attempting to connect to Supabase transaction pooler: {host}:{port}/{database}")
+        
+        # Test connection first
+        engine = create_engine(db_uri)
+        connection = engine.connect()
+        connection.close()
+        
+        # Create SQLDatabase instance
         db = SQLDatabase.from_uri(db_uri)
-        logger.info("Database connection successful")
+        logger.info("Supabase database connection successful")
         return db
+        
     except Exception as e:
-        logger.error(f"Database connection failed: {str(e)}")
+        logger.error(f"Supabase database connection failed: {str(e)}")
         raise e
+
+def init_supabase_client(supabase_url: str, supabase_key: str) -> Client:
+    """Initialize Supabase client for additional operations"""
+    try:
+        supabase_client = create_client(supabase_url, supabase_key)
+        logger.info("Supabase client initialized successfully")
+        return supabase_client
+    except Exception as e:
+        logger.error(f"Supabase client initialization failed: {str(e)}")
+        raise e
+
+
+
+
 
 def detect_visualization_request(user_query: str):
     """Enhanced visualization detection with better single and multi-machine support"""
@@ -62,16 +120,14 @@ def detect_visualization_request(user_query: str):
     # Enhanced chart type detection with single machine support
     chart_type = "bar"  # default
     
-    
-    
     # Check for multi-machine/multi-category requests
     multi_machine_keywords = ['all machines', 'each machine', 'by machine', 'machines production', 'three machines']
     multi_category_keywords = ['by day', 'daily', 'monthly', 'by month','each day', 'each month']
     
-    
     is_multi_machine = any(keyword in user_query_lower for keyword in multi_machine_keywords)
     is_multi_category = any(keyword in user_query_lower for keyword in multi_category_keywords)
     
+    # Determine chart type based on query content
     if is_multi_machine and (is_multi_category or 'bar' in user_query_lower):
         chart_type = "multi_machine_bar"
     elif any(word in user_query_lower for word in ['line', 'trend', 'over time', 'hourly', 'daily', 'time series']):
@@ -91,100 +147,106 @@ def detect_visualization_request(user_query: str):
     return needs_viz, chart_type
 
 def get_enhanced_sql_chain(db):
-    """Enhanced SQL chain with better multi-machine query generation"""
+    """Enhanced SQL chain with PostgreSQL-specific syntax"""
     template = """
-    You are an expert data analyst. Based on the table schema below, write a SQL query that answers the user's question.
+    You are an expert data analyst. Based on the table schema below, write a PostgreSQL query that answers the user's question.
     
     <SCHEMA>{schema}</SCHEMA>
     
     Conversation History: {chat_history}
     
-    IMPORTANT GUIDELINES:
+    IMPORTANT GUIDELINES FOR POSTGRESQL:
     
-    1. For multi-machine production queries by time period:
+    1. Use PostgreSQL-specific functions and syntax:
+       - Use EXTRACT() instead of YEAR(), MONTH(): EXTRACT(YEAR FROM actual_start_time)
+       - Use DATE_TRUNC() for grouping: DATE_TRUNC('day', actual_start_time)
+       - Use TO_CHAR() for date formatting: TO_CHAR(actual_start_time, 'YYYY-MM-DD')
+       - Use CURRENT_DATE instead of NOW() for date comparisons
+       - Use INTERVAL for date arithmetic: actual_start_time >= CURRENT_DATE - INTERVAL '7 days'
+    
+    2. For multi-machine production queries by time period:
        - Always include device_name/machine_name as a separate column
-       - Include time grouping (day, month, hour) as appropriate
+       - Use DATE_TRUNC('day', actual_start_time) for daily grouping
        - Use SUM() for production values
        - GROUP BY both time period AND machine/device
        - ORDER BY time period, then machine name
     
-    2. For machine efficiency queries:
-       - Calculate efficiency as a percentage: (actual_output / target_output) * 100 AS efficiency
+    3. For machine efficiency queries:
+       - Calculate efficiency as a percentage: (actual_output / NULLIF(target_output, 0)) * 100 AS efficiency
+       - Use NULLIF to avoid division by zero
        - Include machine/device name
        - Filter for specific dates if mentioned
        - ORDER BY efficiency DESC or machine name
     
-    3. For April 2025 data specifically:
-       - Use WHERE clause with date range: WHERE DATE(actual_start_time) BETWEEN '2025-04-01' AND '2025-04-30'
-       - Or use: WHERE YEAR(actual_start_time) = 2025 AND MONTH(actual_start_time) = 4
+    4. For April 2025 data specifically:
+       - Use WHERE clause: WHERE DATE_TRUNC('month', actual_start_time) = '2025-04-01'::date
+       - Or use: WHERE EXTRACT(YEAR FROM actual_start_time) = 2025 AND EXTRACT(MONTH FROM actual_start_time) = 4
     
-    4. For daily data:
-       - Use DATE(actual_start_time) or DATE_FORMAT(actual_start_time, '%Y-%m-%d') for grouping
+    5. For daily data:
+       - Use DATE_TRUNC('day', actual_start_time) for grouping
        - Alias as 'production_date' or 'day'
     
-    5. Column naming conventions:
+    6. Column naming conventions:
        - Use clear aliases: production_output AS daily_production
        - Use device_name AS machine_name for consistency
-       - Use DATE(actual_start_time) AS production_date
+       - Use DATE_TRUNC('day', actual_start_time) AS production_date
        - Use efficiency AS efficiency_percent
     
-    6. Data quality:
+    7. Data quality:
        - Handle NULL values: WHERE production_output IS NOT NULL
        - Filter out zero values if needed: AND production_output > 0
        
-    7. For pulse per minute calculations:
+    8. For pulse per minute calculations:
         - Use LAG() function: LAG(length) OVER (PARTITION BY device_name ORDER BY timestamp)
         - Calculate pulse as: length - LAG(length) OVER (PARTITION BY device_name ORDER BY timestamp) AS pulse_per_minute
         - Filter out NULL values from LAG calculation
         - Order by timestamp for proper sequence
     
-    EXAMPLES:
+    POSTGRESQL EXAMPLES:
     
     Question: "Show all three machines production by each machine in April with bar chart for all 30 day"
     SQL Query: SELECT 
-        DATE(actual_start_time) AS production_date,
+        DATE_TRUNC('day', actual_start_time)::date AS production_date,
         device_name AS machine_name,
         SUM(production_output) AS daily_production
     FROM hourly_production 
-    WHERE YEAR(actual_start_time) = 2024 
-        AND MONTH(actual_start_time) = 4 
+    WHERE EXTRACT(YEAR FROM actual_start_time) = 2024 
+        AND EXTRACT(MONTH FROM actual_start_time) = 4 
         AND production_output IS NOT NULL 
         AND production_output > 0
-    GROUP BY DATE(actual_start_time), device_name
+    GROUP BY DATE_TRUNC('day', actual_start_time), device_name
     ORDER BY production_date, machine_name
     
     Question: "Plot the bar chart showing each machine's efficiency on April 1 2025"
     SQL Query: SELECT 
         device_name AS machine_name,
-        ROUND((SUM(production_output) / SUM(target_output)) * 100, 2) AS efficiency_percent
+        ROUND((SUM(production_output) / NULLIF(SUM(target_output), 0)) * 100, 2) AS efficiency_percent
     FROM hourly_production 
-    WHERE DATE(actual_start_time) = '2025-04-01'
+    WHERE DATE_TRUNC('day', actual_start_time) = '2025-04-01'::date
         AND production_output IS NOT NULL 
         AND target_output IS NOT NULL
         AND target_output > 0
     GROUP BY device_name
     ORDER BY efficiency_percent DESC
     
-    
-     Question: "give the bar chart showing each machine's production on April 1 2025"
-     SQL Query: SELECT 
+    Question: "give the bar chart showing each machine's production on April 1 2025"
+    SQL Query: SELECT 
         device_name AS machine_name,
         SUM(production_output) AS daily_production
     FROM daily_production_1
-    WHERE DATE(actual_start_time) = '2025-04-01'
+    WHERE DATE_TRUNC('day', actual_start_time) = '2025-04-01'::date
         AND production_output IS NOT NULL
         AND production_output > 0
     GROUP BY device_name
     ORDER BY machine_name
 
-    
     Question: "Show machine efficiency for each machine in April 2025"
     SQL Query: SELECT 
         device_name AS machine_name,
-        ROUND(AVG((production_output / target_output) * 100), 2) AS efficiency_percent
+        ROUND(AVG((production_output / NULLIF(target_output, 0)) * 100), 2) AS efficiency_percent
     FROM hourly_production 
-    WHERE YEAR(actual_start_time) = 2025 
-        AND MONTH(actual_start_time) = 4
+    WHERE EXTRACT(YEAR FROM actual_start_time) = 2025 
+        AND EXTRACT(MONTH FROM actual_start_time) = 4
         AND production_output IS NOT NULL 
         AND target_output IS NOT NULL
         AND target_output > 0
@@ -193,13 +255,13 @@ def get_enhanced_sql_chain(db):
     
     Question: "Compare production by machine for last 7 days"
     SQL Query: SELECT 
-        DATE(actual_start_time) AS production_date,
+        DATE_TRUNC('day', actual_start_time)::date AS production_date,
         device_name AS machine_name,
         SUM(production_output) AS daily_production
     FROM hourly_production 
-    WHERE actual_start_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    WHERE actual_start_time >= CURRENT_DATE - INTERVAL '7 days'
         AND production_output IS NOT NULL
-    GROUP BY DATE(actual_start_time), device_name
+    GROUP BY DATE_TRUNC('day', actual_start_time), device_name
     ORDER BY production_date, machine_name
     
     Question: "Show pulse per minute for Machine1 on June 1st"
@@ -209,7 +271,7 @@ def get_enhanced_sql_chain(db):
         length,
         length - LAG(length) OVER (PARTITION BY device_name ORDER BY timestamp) AS pulse_per_minute
     FROM length_data 
-    WHERE DATE(timestamp) = '2025-06-01' 
+    WHERE DATE_TRUNC('day', timestamp) = '2025-06-01'::date 
         AND device_name = 'Machine1'
         AND length IS NOT NULL
     ORDER BY timestamp
@@ -224,11 +286,11 @@ def get_enhanced_sql_chain(db):
     
     # Fixed Azure OpenAI configuration
     llm = AzureChatOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Changed from deployment_name
-        temperature=0,  # Changed from 1 to 0 for more consistent SQL generation
+        azure_endpoint=get_env_var("AZURE_OPENAI_ENDPOINT"),
+        api_key=get_env_var("AZURE_OPENAI_API_KEY"),
+        api_version=get_env_var("AZURE_OPENAI_API_VERSION"),
+        azure_deployment=get_env_var("AZURE_OPENAI_DEPLOYMENT_NAME"),
+        temperature=0,
         max_tokens=800,
     )
     
@@ -279,8 +341,6 @@ def create_enhanced_visualization(df, chart_type, user_query):
         logger.info(f"Categorical columns: {categorical_cols}")
         
         fig = None
-        
-        
         
         # Enhanced multi-machine bar chart
         if chart_type == "multi_machine_bar" or chart_type == "grouped_bar":
@@ -362,7 +422,7 @@ def create_enhanced_visualization(df, chart_type, user_query):
                                title=f"Grouped Bar Chart: {y_col} by {x_col} and {color_col}",
                                barmode='group')
         
-        # Other chart types (keeping your existing logic)
+        # Other chart types (keeping existing logic)
         elif chart_type == "line":
             if len(df.columns) >= 2:
                 x_col = df.columns[0]
@@ -521,33 +581,36 @@ def get_casual_response(user_query: str) -> str:
     user_query_lower = user_query.lower().strip()
     
     if any(greeting in user_query_lower for greeting in ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening']):
-        return """Hello! 👋 I'm your Production Analytics Bot. I'm here to help you analyze your production data and create visualizations."""
+        return """Hello! 👋 I'm your Production Analytics Bot powered by Supabase. I'm here to help you analyze your production data and create visualizations."""
 
     elif any(phrase in user_query_lower for phrase in ['how are you', 'whats up', "what's up"]):
-        return """I'm doing great, thank you! 😊 Ready to help you dive into your production data.
+        return """I'm doing great, thank you! 😊 Ready to help you dive into your production data stored in Supabase.
 
 Is there any specific production analysis or visualization you'd like me to help you with?"""
 
     elif any(phrase in user_query_lower for phrase in ['thank you', 'thanks']):
-        return """You're welcome! 😊 I'm here whenever you need help with production data analysis or creating visualizations.
+        return """You're welcome! 😊 I'm here whenever you need help with production data analysis or creating visualizations from your Supabase database.
 
 Feel free to ask me about any production metrics you'd like to explore!"""
 
     elif any(phrase in user_query_lower for phrase in ['help', 'what can you do', 'how does this work']):
-        return """I'm your Production Analytics Assistant! Here's how I can help:
+        return """I'm your Production Analytics Assistant powered by Supabase! Here's how I can help:
 
+🔍 **Query your Supabase database** with natural language
+📊 **Create interactive visualizations** (bar charts, line charts, pie charts)
+🏭 **Analyze multi-machine production data** with comparisons
+📈 **Track efficiency, output, and performance metrics**
+⏱️ **Monitor pulse rates and time-series data**
 
 Just ask me a question about your production data, and I'll generate both the analysis and visualizations for you!"""
 
     elif user_query_lower in ['test', 'testing']:
-        return """System test successful! ✅ 
-
+        return """System test successful! ✅ Supabase connection ready.
 
 What would you like to analyze?"""
 
     else:
-        return """I'm here to help with production data analysis and visualizations! 
-
+        return """I'm here to help with production data analysis and visualizations from your Supabase database! 
 
 What production data would you like to explore? 📊"""
 
@@ -642,10 +705,10 @@ def get_enhanced_response(user_query: str, db: SQLDatabase, chat_history: list):
     
         # Fixed Azure OpenAI configuration
         llm = AzureChatOpenAI(
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Changed from deployment_name
+            azure_endpoint=get_env_var("AZURE_OPENAI_ENDPOINT"),
+            api_key=get_env_var("AZURE_OPENAI_API_KEY"),
+            api_version=get_env_var("AZURE_OPENAI_API_VERSION"),
+            azure_deployment=get_env_var("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Changed from deployment_name
             temperature=0,  # Changed from 1 to 0 for more consistent SQL generation
             max_tokens=800,
     )
@@ -674,9 +737,16 @@ if "chat_history" not in st.session_state:
         AIMessage(content="Hello! I'm your Althinect Intelligence Bot. I can help you analyze multi-machine production data with colorful visualizations! 📊\n\nTry asking: *'Show all three machines production by each machine in April with bar chart for all 30 day'*"),
     ]
 
-load_dotenv()
+#load_dotenv()
 
-if not os.getenv("AZURE_OPENAI_API_KEY"):
+
+
+
+
+
+
+
+if not get_env_var("AZURE_OPENAI_API_KEY"):
     st.error("⚠️ AZURE_OPENAI_API_KEY key not found. Please add AZURE_OPENAI_API_KEY to your .env file.")
     st.stop()
 
@@ -684,47 +754,103 @@ st.set_page_config(page_title="Althinect Intelligence Bot", page_icon="📊")
 
 st.title("Althinect Intelligence Bot")
 
-
+# Supabase sidebar
 with st.sidebar:
-    st.subheader("⚙️ Database Settings")
-    st.write("Connect to your MySQL database")
+    st.subheader("⚙️ Supabase Database Settings")
+    st.write("Connect to your Supabase PostgreSQL database")
     
-    st.text_input("Host", value="localhost", key="Host")
-    st.text_input("Port", value="3306", key="Port")
-    st.text_input("User", value="root", key="User")
-    st.text_input("Password", type="password", value="chama:1234", key="Password")
-    st.text_input("Database", value="Analyzee_machines", key="Database")
+    # Pre-populate from environment variables
+    default_url = get_env_var("SUPABASE_URL", "")
+    default_anon_key = get_env_var("SUPABASE_ANON_KEY", "")
+    default_db_password = get_env_var("SUPABASE_DB_PASSWORD", "")
     
-    if st.button("🔌 Connect", type="primary"):
-        with st.spinner("Connecting to database..."):
+    st.text_input("Supabase URL", value=default_url, key="SupabaseUrl", 
+                  help="Format: https://your-project-id.supabase.co")
+    st.text_input("Anon Key", value=default_anon_key, key="SupabaseAnonKey", type="password",
+                  help="Your Supabase anonymous/public key")
+    st.text_input("Database Password", type="password", value=default_db_password, key="SupabaseDbPassword",
+                  help="Your Supabase database password")
+    
+    # Connection status indicator
+    connection_status = st.empty()
+    
+    if st.button("🔌 Connect to Supabase", type="primary"):
+        with st.spinner("Connecting to Supabase database..."):
             try:
-                db = init_database(
-                    st.session_state["User"],
-                    st.session_state["Password"],
-                    st.session_state["Host"],
-                    st.session_state["Port"],
-                    st.session_state["Database"]
+                # Initialize Supabase client
+                supabase_client = init_supabase_client(
+                    st.session_state["SupabaseUrl"],
+                    st.session_state["SupabaseAnonKey"]
+                )
+                st.session_state.supabase_client = supabase_client
+                
+                # Initialize database connection
+                db = init_supabase_database(
+                    st.session_state["SupabaseUrl"],
+                    st.session_state["SupabaseAnonKey"],
+                    st.session_state["SupabaseDbPassword"]
                 )
                 st.session_state.db = db
-                st.success("✅ Connected to database!")
-                logger.info("Database connected successfully via UI")
+                
+                st.success("✅ Connected to Supabase!")
+                logger.info("Supabase database connected successfully via UI")
+                
+                # Test the connection with a simple query
+                try:
+                    test_result = db.run("SELECT version();")
+                    st.info(f"📡 PostgreSQL Version: {test_result}")
+                except Exception as e:
+                    st.warning(f"⚠️ Connection established but query test failed: {str(e)}")
+                    
             except Exception as e:
-                error_msg = f"❌ Connection failed: {str(e)}"
+                error_msg = f"❌ Supabase connection failed: {str(e)}"
                 st.error(error_msg)
-                logger.error(f"Database connection failed via UI: {str(e)}")
+                logger.error(f"Supabase connection failed via UI: {str(e)}")
+                
+                # Provide helpful error messages
+                if "authentication failed" in str(e).lower():
+                    st.info("💡 **Tip**: Check your database password. This is different from your Supabase project password.")
+                elif "could not translate host name" in str(e).lower():
+                    st.info("💡 **Tip**: Verify your Supabase URL format (https://your-project-id.supabase.co)")
+                elif "connection refused" in str(e).lower():
+                    st.info("💡 **Tip**: Make sure your Supabase project is not paused and database is accessible.")
     
+    # Connection status display
     if "db" in st.session_state:
-        st.success("🟢 Database Connected")
+        st.success("🟢 Supabase Connected")
         
-        # Show table info
+        # Show database information
         try:
-            with st.expander("📋 Table Information"):
+            with st.expander("📋 Database Schema Information"):
                 table_info = st.session_state.db.get_table_info()
-                st.text(table_info[:500] + "..." if len(table_info) > 500 else table_info)
-        except:
-            pass
+                if len(table_info) > 1000:
+                    st.text(table_info[:1000] + "\n\n... (truncated)")
+                    with st.expander("📄 Full Schema"):
+                        st.text(table_info)
+                else:
+                    st.text(table_info)
+        except Exception as e:
+            st.warning(f"Could not fetch schema info: {str(e)}")
+            
     else:
-        st.warning("🔴 Database Not Connected")
+        st.warning("🔴 Supabase Not Connected")
+        
+    # Additional Supabase info
+    with st.expander("ℹ️ Supabase Setup Help"):
+        st.markdown("""
+        **Required Environment Variables:**
+        ```
+        SUPABASE_URL=https://your-project-id.supabase.co
+        SUPABASE_ANON_KEY=your-anon-key
+        SUPABASE_DB_PASSWORD=your-database-password
+        ```
+        
+        **Where to find these:**
+        1. **Supabase URL & Anon Key**: Project Settings → API
+        2. **Database Password**: The password you set when creating your project
+        
+        **Note**: The database password is different from your Supabase account password.
+        """)
 
 # Chat interface
 for message in st.session_state.chat_history:
@@ -735,7 +861,7 @@ for message in st.session_state.chat_history:
         with st.chat_message("user", avatar="👤"):
             st.markdown(message.content)
 
-user_query = st.chat_input("💬 Ask about multi-machine production data...")
+user_query = st.chat_input("💬 Ask about multi-machine production data from Supabase...")
 if user_query is not None and user_query.strip() != "":
     logger.info(f"User query received: {user_query}")
     st.session_state.chat_history.append(HumanMessage(content=user_query))
@@ -749,13 +875,13 @@ if user_query is not None and user_query.strip() != "":
             response = get_casual_response(user_query)
             st.markdown(response)
         elif "db" in st.session_state:
-            with st.spinner("🔄 Analyzing data and creating visualization..."):
+            with st.spinner("🔄 Analyzing Supabase data and creating visualization..."):
                 response = get_enhanced_response(user_query, st.session_state.db, st.session_state.chat_history)
                 st.markdown(response)
         else:
-            response = "⚠️ Please connect to the database first using the sidebar to analyze production data."
+            response = "⚠️ Please connect to your Supabase database first using the sidebar to analyze production data."
             st.markdown(response)
-            logger.warning("User attempted to query without database connection")
+            logger.warning("User attempted to query without Supabase connection")
         
     st.session_state.chat_history.append(AIMessage(content=response))
     logger.info("Conversation turn completed")

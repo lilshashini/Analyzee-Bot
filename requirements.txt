@@ -12,3 +12,6 @@ numpy
 supabase
 sqlalchemy 
 psycopg2-binary
+clickhouse-driver
+clickhouse-sqlalchemy
+

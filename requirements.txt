@@ -14,4 +14,6 @@ sqlalchemy
 psycopg2-binary
 clickhouse-driver
 clickhouse-sqlalchemy
+clickhouse-connect
+
 

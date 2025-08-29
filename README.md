@@ -36,7 +36,7 @@ This intelligent chatbot is designed to interpret natural language queries and p
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/Analyzee-Bot.git
+git clone https://github.com/lilshashini/Analyzee-Bot.git
 cd Analyzee-Bot
 ```
 

@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  streamlit-app:
+    build: .
+    ports:
+      - "8501:8501"
+    # For production, don't mount volumes (code is baked into image)
+    # For development, use docker-compose.dev.yml instead
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,0 +1,17 @@
+streamlit
+pandas
+plotly
+python-dotenv
+mysql-connector-python
+sqlalchemy
+langchain
+langchain-openai
+langchain-community
+openai
+numpy
+supabase
+sqlalchemy 
+psycopg2-binary
+clickhouse-driver
+clickhouse-sqlalchemy
+clickhouse-connect
